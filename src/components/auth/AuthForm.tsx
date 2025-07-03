@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
-import { Mail, Lock, User, AlertCircle, Info, CheckCircle, ArrowLeft } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, Info, CheckCircle, ArrowLeft, Wifi, WifiOff, AlertTriangle, ExternalLink } from "lucide-react";
+import { EnhancedSupabaseError } from "../../utils/errorHandler";
 import nailblissLogo from "../../assets/logo.png";
 
 type AuthMode = 'signin' | 'signup' | 'forgot-password' | 'reset-password';
@@ -17,10 +18,20 @@ export const AuthForm: React.FC = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showHelp, setShowHelp] = useState(false);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const [lastEnhancedError, setLastEnhancedError] = useState<EnhancedSupabaseError | null>(null);
 
-  const { signIn, signUp, resetPassword, updatePassword, isResettingPassword } = useAuth();
+  const { 
+    signIn, 
+    signUp, 
+    resetPassword, 
+    updatePassword, 
+    isResettingPassword, 
+    connectionStatus,
+    lastError 
+  } = useAuth();
 
-  // Check if we're in password reset mode (URL contains access_token)
+  // Check if we're in password reset mode
   React.useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const accessToken = urlParams.get('access_token');
@@ -92,6 +103,7 @@ export const AuthForm: React.FC = () => {
     setError("");
     setSuccess("");
     setShowHelp(false);
+    setLastEnhancedError(null);
 
     try {
       switch (mode) {
@@ -120,10 +132,16 @@ export const AuthForm: React.FC = () => {
           break;
       }
     } catch (err: any) {
-      setError(err.message || "An error occurred");
-
-      if (err.code === "invalid_credentials" && mode === 'signin') {
-        setShowHelp(true);
+      if (err instanceof EnhancedSupabaseError) {
+        setLastEnhancedError(err);
+        setError(err.getUserMessage());
+        
+        // Show help for user errors
+        if (err.analysis.isUserError && mode === 'signin') {
+          setShowHelp(true);
+        }
+      } else {
+        setError(err.message || "An unexpected error occurred");
       }
     } finally {
       setLoading(false);
@@ -140,6 +158,8 @@ export const AuthForm: React.FC = () => {
     setError("");
     setSuccess("");
     setShowHelp(false);
+    setShowTechnicalDetails(false);
+    setLastEnhancedError(null);
   };
 
   const switchMode = (newMode: AuthMode) => {
@@ -169,10 +189,54 @@ export const AuthForm: React.FC = () => {
     }
   };
 
+  const getConnectionStatusIcon = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return <Wifi className="w-4 h-4 text-green-500" />;
+      case 'disconnected':
+        return <WifiOff className="w-4 h-4 text-red-500" />;
+      case 'checking':
+        return <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />;
+    }
+  };
+
+  const getConnectionStatusText = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return "Connected";
+      case 'disconnected':
+        return "Connection issues detected";
+      case 'checking':
+        return "Checking connection...";
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-3xl shadow-2xl p-8 border border-pink-100">
+          {/* Connection Status */}
+          <div className="flex items-center justify-between mb-4 p-2 bg-gray-50 rounded-lg">
+            <div className="flex items-center space-x-2 text-sm">
+              {getConnectionStatusIcon()}
+              <span className={`font-medium ${
+                connectionStatus === 'connected' ? 'text-green-700' :
+                connectionStatus === 'disconnected' ? 'text-red-700' :
+                'text-gray-700'
+              }`}>
+                {getConnectionStatusText()}
+              </span>
+            </div>
+            {connectionStatus === 'disconnected' && (
+              <button
+                onClick={() => window.location.reload()}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-28 h-28 bg-gradient-to-r from-pink-400 to-rose-400 rounded-full mb-4">
               <img
@@ -326,9 +390,61 @@ export const AuthForm: React.FC = () => {
             )}
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <span>{error}</span>
+              <div className="space-y-3">
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <span>{error}</span>
+                    {lastEnhancedError && (
+                      <div className="mt-2 space-y-2">
+                        {lastEnhancedError.getSuggestedActions().length > 0 && (
+                          <div>
+                            <p className="font-medium text-xs">Suggested actions:</p>
+                            <ul className="text-xs list-disc list-inside space-y-1 mt-1">
+                              {lastEnhancedError.getSuggestedActions().map((action, index) => (
+                                <li key={index}>{action}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        
+                        {lastEnhancedError.requiresSupabaseUpdate() && (
+                          <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+                              <div className="text-xs text-yellow-700">
+                                <p className="font-medium">Backend Update Required</p>
+                                <p>This error may require database or configuration changes in Supabase. Please contact support with the technical details below.</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                        >
+                          {showTechnicalDetails ? 'Hide' : 'Show'} technical details
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
+
+                        {showTechnicalDetails && (
+                          <div className="p-2 bg-gray-50 border border-gray-200 rounded-lg">
+                            <p className="text-xs text-gray-600 font-mono break-all">
+                              {lastEnhancedError.getTechnicalMessage()}
+                            </p>
+                            <div className="mt-2 text-xs text-gray-500">
+                              <p>Operation: {lastEnhancedError.context.operation}</p>
+                              <p>Timestamp: {new Date(lastEnhancedError.context.timestamp).toISOString()}</p>
+                              <p>Severity: {lastEnhancedError.analysis.severity}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -339,7 +455,7 @@ export const AuthForm: React.FC = () => {
               </div>
             )}
 
-            {showHelp && mode === 'signin' && (
+            {showHelp && mode === 'signin' && !lastEnhancedError?.analysis.isNetworkError && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm">
                 <div className="flex items-start gap-2">
                   <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -357,13 +473,13 @@ export const AuthForm: React.FC = () => {
 
             <button
               type="submit"
-              disabled={loading || isResettingPassword}
+              disabled={loading || isResettingPassword || connectionStatus === 'disconnected'}
               className="w-full py-3 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-xl font-semibold hover:from-pink-600 hover:to-rose-600 transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:transform-none flex items-center justify-center"
             >
               {(loading || isResettingPassword) && (
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
               )}
-              {getButtonText()}
+              {connectionStatus === 'disconnected' ? 'Connection Required' : getButtonText()}
             </button>
           </form>
 
