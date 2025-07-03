@@ -2,10 +2,10 @@ import React, { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { QRScanner } from "./QRScanner";
 import { CustomerConfirmation } from "./CustomerConfirmation";
-import { LogOut, Users } from "lucide-react";
+import { LogOut, Users, Settings } from "lucide-react";
 
 export const StaffDashboard: React.FC = () => {
-  // const { user, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const [scannedCustomer, setScannedCustomer] = useState<any>(null);
 
   const handleScanSuccess = (customerData: any) => {
@@ -20,7 +20,7 @@ export const StaffDashboard: React.FC = () => {
     setScannedCustomer(null);
   };
 
-  // if (!user) return null;
+  if (!user) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
@@ -40,12 +40,18 @@ export const StaffDashboard: React.FC = () => {
                 </p>
               </div>
             </div>
-            <button
-              onClick={signOut}
-              className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
+            <div className="flex items-center space-x-2">
+              <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+                <Settings className="w-5 h-5" />
+              </button>
+              <button
+                onClick={signOut}
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       </header>

@@ -29,3 +29,8 @@ export interface AuthState {
   signUp: (email: string, password: string, fullName: string, role?: 'customer' | 'staff', rememberMe?: boolean) => Promise<void>;
   signOut: () => Promise<void>;
 }
+
+export interface AuthError extends Error {
+  status?: number;
+  code?: string;
+}

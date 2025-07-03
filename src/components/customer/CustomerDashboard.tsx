@@ -1,12 +1,12 @@
 import React from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { DigitalLoyaltyCard } from "./DigitalLoyaltyCard";
-import { LogOut, User, Menu } from "lucide-react";
+import { LogOut, User, Menu, Settings } from "lucide-react";
 
 export const CustomerDashboard: React.FC = () => {
-  // const { user, signOut } = useAuth();
+  const { user, signOut } = useAuth();
 
-  // if (!user) return null;
+  if (!user) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -27,11 +27,12 @@ export const CustomerDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-2">
               <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
-                <Menu className="w-5 h-5" />
+                <Settings className="w-5 h-5" />
               </button>
               <button
                 onClick={signOut}
                 className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                title="Sign Out"
               >
                 <LogOut className="w-5 h-5" />
               </button>
