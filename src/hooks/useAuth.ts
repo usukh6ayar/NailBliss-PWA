@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { User, AuthState } from '../types';
-import { EnhancedSupabaseError, createErrorContext } from '../utils/errorHandler';
 
 const REMEMBER_ME_KEY = 'nailbliss_remember_me';
 
@@ -11,14 +10,14 @@ export const useAuth = (): AuthState & {
   isResettingPassword: boolean;
   resetPasswordError: string | null;
   connectionStatus: 'connected' | 'disconnected' | 'checking';
-  lastError: EnhancedSupabaseError | null;
+  lastError: Error | null;
 } => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
-  const [lastError, setLastError] = useState<EnhancedSupabaseError | null>(null);
+  const [lastError, setLastError] = useState<Error | null>(null);
 
   // Test Supabase connection
   const testConnection = useCallback(async () => {
@@ -44,16 +43,32 @@ export const useAuth = (): AuthState & {
     }
   }, []);
 
-  const handleError = useCallback((error: any, operation: string): EnhancedSupabaseError => {
-    const context = createErrorContext(operation);
-    const enhancedError = new EnhancedSupabaseError(error, context);
-    setLastError(enhancedError);
+  const handleError = useCallback((error: any, operation: string): Error => {
+    console.error(`Auth Error [${operation}]:`, error);
     
-    // Update connection status based on error type
-    if (enhancedError.analysis.isNetworkError || enhancedError.analysis.isSupabaseDown) {
+    let userMessage = '';
+    
+    // Handle specific error types
+    if (error?.message?.includes('fetch') || error?.message?.includes('network')) {
+      userMessage = "Network connection failed. Please check your internet connection and try again.";
       setConnectionStatus('disconnected');
+    } else if (error?.message?.includes('Invalid login credentials') || error?.code === 'invalid_credentials') {
+      userMessage = "Invalid email or password. Please check your credentials and try again.";
+    } else if (error?.message?.includes('Email not confirmed') || error?.code === 'email_not_confirmed') {
+      userMessage = "Please check your email and click the confirmation link before signing in.";
+    } else if (error?.message?.includes('User already registered') || error?.code === 'user_already_exists') {
+      userMessage = "An account with this email already exists. Please sign in instead.";
+    } else if (error?.message?.includes('row-level security policy') || error?.code === '42501') {
+      userMessage = "Account permissions issue. Please contact support if this persists.";
+    } else if ([500, 502, 503, 504].includes(error?.status)) {
+      userMessage = "Our servers are temporarily unavailable. Please try again in a few minutes.";
+      setConnectionStatus('disconnected');
+    } else {
+      userMessage = error?.message || "An unexpected error occurred. Please try again.";
     }
     
+    const enhancedError = new Error(userMessage);
+    setLastError(enhancedError);
     return enhancedError;
   }, []);
 
@@ -75,7 +90,7 @@ export const useAuth = (): AuthState & {
 
       return data;
     } catch (error) {
-      if (error instanceof EnhancedSupabaseError) {
+      if (error instanceof Error) {
         throw error;
       }
       throw handleError(error, 'fetching user profile');
@@ -169,11 +184,17 @@ export const useAuth = (): AuthState & {
         if (session?.user) {
           setLoading(true);
           try {
+            // Add a small delay to ensure the user profile is created
+            if (event === 'SIGNED_UP') {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
             const userData = await fetchUserProfile(session.user.id);
             setUser(userData);
           } catch (error) {
-            if (error.message?.includes('User profile not found')) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
+            // If profile not found and this is a new signup, wait and retry
+            if (error.message?.includes('User profile not found') || error.message?.includes('0 rows')) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
               try {
                 const userData = await fetchUserProfile(session.user.id);
                 setUser(userData);
@@ -236,7 +257,8 @@ export const useAuth = (): AuthState & {
         throw handleError(new Error('User creation failed - no user data returned'), 'signing up');
       }
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Wait a bit before creating profile to ensure auth user is fully created
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const { error: profileError } = await supabase
         .from('users')
@@ -262,7 +284,7 @@ export const useAuth = (): AuthState & {
       setLoading(false);
     } catch (error) {
       setLoading(false);
-      if (error instanceof EnhancedSupabaseError) {
+      if (error instanceof Error) {
         throw error;
       }
       throw handleError(error, 'signing up');
@@ -298,7 +320,7 @@ export const useAuth = (): AuthState & {
       setLoading(false);
     } catch (error) {
       setLoading(false);
-      if (error instanceof EnhancedSupabaseError) {
+      if (error instanceof Error) {
         throw error;
       }
       throw handleError(error, 'signing in');
@@ -320,7 +342,7 @@ export const useAuth = (): AuthState & {
       setLoading(false);
     } catch (error) {
       setLoading(false);
-      if (error instanceof EnhancedSupabaseError) {
+      if (error instanceof Error) {
         throw error;
       }
       throw handleError(error, 'signing out');
@@ -350,8 +372,8 @@ export const useAuth = (): AuthState & {
       setIsResettingPassword(false);
     } catch (error) {
       setIsResettingPassword(false);
-      const enhancedError = error instanceof EnhancedSupabaseError ? error : handleError(error, 'requesting password reset');
-      setResetPasswordError(enhancedError.getUserMessage());
+      const enhancedError = error instanceof Error ? error : handleError(error, 'requesting password reset');
+      setResetPasswordError(enhancedError.message);
       throw enhancedError;
     }
   };
@@ -372,7 +394,7 @@ export const useAuth = (): AuthState & {
       setLoading(false);
     } catch (error) {
       setLoading(false);
-      if (error instanceof EnhancedSupabaseError) {
+      if (error instanceof Error) {
         throw error;
       }
       throw handleError(error, 'updating password');
