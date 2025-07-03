@@ -66,6 +66,10 @@ export const useRobustAuth = () => {
       authError = new Error('Account registration is currently disabled. Please contact support.') as AuthError;
       authError.status = 403;
       authError.code = 'signup_disabled';
+    } else if (error?.message?.includes('row-level security policy') || error?.code === '42501') {
+      authError = new Error('Permission denied. Please try again or contact support if the issue persists.') as AuthError;
+      authError.status = 403;
+      authError.code = 'rls_policy_violation';
     } else if (error?.message?.includes('fetch')) {
       // Network errors
       authError = new Error('Network connection failed. Please check your internet connection.') as AuthError;
@@ -284,6 +288,7 @@ export const useRobustAuth = () => {
     try {
       updateState({ loading: true, error: null });
 
+      // First, sign up the user
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -296,29 +301,35 @@ export const useRobustAuth = () => {
         throw createAuthError(error, 'signing up');
       }
 
-      if (data.user) {
-        // Create user profile
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email: email.trim(),
-            full_name: fullName.trim(),
-            role,
-            current_points: 0,
-            total_visits: 0,
-          });
+      if (!data.user) {
+        throw new Error('User creation failed - no user data returned');
+      }
 
-        if (profileError) {
-          throw createAuthError(profileError, 'creating user profile');
-        }
+      // Wait a moment for the auth user to be fully created
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Set remember me preference
-        if (rememberMe) {
-          localStorage.setItem(REMEMBER_ME_KEY, 'true');
-        } else {
-          localStorage.removeItem(REMEMBER_ME_KEY);
-        }
+      // Create user profile - this should now work with the updated RLS policies
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          id: data.user.id,
+          email: email.trim(),
+          full_name: fullName.trim(),
+          role,
+          current_points: 0,
+          total_visits: 0,
+        });
+
+      if (profileError) {
+        console.error('Profile creation error:', profileError);
+        throw createAuthError(profileError, 'creating user profile');
+      }
+
+      // Set remember me preference
+      if (rememberMe) {
+        localStorage.setItem(REMEMBER_ME_KEY, 'true');
+      } else {
+        localStorage.removeItem(REMEMBER_ME_KEY);
       }
 
       updateState({ loading: false });
@@ -402,12 +413,39 @@ export const useRobustAuth = () => {
 
         if (session?.user && event === 'SIGNED_IN') {
           updateState({ loading: true });
-          const userData = await fetchUserProfile(session.user.id);
-          updateState({
-            user: userData,
-            loading: false,
-            error: null,
-          });
+          
+          try {
+            const userData = await fetchUserProfile(session.user.id);
+            updateState({
+              user: userData,
+              loading: false,
+              error: null,
+            });
+          } catch (error) {
+            // If profile doesn't exist yet (during signup), wait a bit and try again
+            if (error.message?.includes('User profile not found')) {
+              console.log('Profile not found, waiting for creation...');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              try {
+                const userData = await fetchUserProfile(session.user.id);
+                updateState({
+                  user: userData,
+                  loading: false,
+                  error: null,
+                });
+              } catch (retryError) {
+                console.error('Profile still not found after retry:', retryError);
+                updateState({
+                  user: null,
+                  loading: false,
+                  error: createAuthError(retryError, 'auth state change'),
+                });
+              }
+            } else {
+              throw error;
+            }
+          }
         }
       } catch (error) {
         const authError = createAuthError(error, 'auth state change');
